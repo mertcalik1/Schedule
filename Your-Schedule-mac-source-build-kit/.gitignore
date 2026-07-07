@@ -1,0 +1,38 @@
+# Local agent/editor state
+.obsidian/
+docs/**/.obsidian/
+
+# Secrets and local config
+.env
+.env.*
+*.pfx
+*.pem
+*.key
+*.jks
+*.keystore
+appsettings.Production.json
+secrets.json
+
+# Common build/cache output
+bin/
+obj/
+build/
+dist/
+out/
+src/www/
+.gradle/
+.idea/
+.vs/
+node_modules/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
+
+# Packaged artifacts
+*.zip
+*.dmg
+*.exe
+*.msi
+*.pkg

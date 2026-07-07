@@ -1,0 +1,23 @@
+{
+    "name":  "Your Schedule",
+    "short_name":  "Schedule",
+    "description":  "A personal calendar, reminder, routine, and time analysis app.",
+    "start_url":  "./index.html",
+    "scope":  "./",
+    "display":  "standalone",
+    "background_color":  "#f5f6f1",
+    "theme_color":  "#1f7a5a",
+    "orientation":  "any",
+    "icons":  [
+                  {
+                      "src":  "assets/logo.png",
+                      "sizes":  "512x512",
+                      "type":  "image/png",
+                      "purpose":  "any maskable"
+                  }
+              ],
+    "categories":  [
+                       "productivity",
+                       "utilities"
+                   ]
+}

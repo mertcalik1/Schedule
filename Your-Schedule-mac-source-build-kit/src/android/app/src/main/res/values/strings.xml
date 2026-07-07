@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Time Calendar</string>
+    <string name="title_activity_main">Time Calendar</string>
+    <string name="package_name">com.mert.timecalendar</string>
+    <string name="custom_url_scheme">com.mert.timecalendar</string>
+</resources>
