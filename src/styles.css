@@ -928,7 +928,8 @@ textarea:focus {
   }
 
   .workspace:has(.content-grid.year-view) {
-    grid-template-rows: auto auto auto;
+    display: block;
+    min-height: 0;
     max-height: none;
     overflow: visible;
   }
