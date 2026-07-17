@@ -321,10 +321,14 @@ function closeUserSettings() {
 }
 
 function syncEndToStart() {
-  if (!els.start.value) return;
-  const start = new Date(els.start.value);
-  if (Number.isNaN(start.getTime())) return;
-  els.end.value = toInputDateTime(new Date(start.getTime() + 60 * 60000));
+  clearDateFieldErrors();
+  const start = parseDateTimeInput(els.start);
+  if (!start) return;
+
+  const end = parseDateTimeInput(els.end);
+  if (!end || end <= start) {
+    els.end.value = toInputDateTime(new Date(start.getTime() + 60 * 60000));
+  }
 }
 
 function renderRoutineList() {
@@ -509,11 +513,20 @@ function closeRoutineManager() {
 function saveEvent(event) {
   event.preventDefault();
 
-  const start = new Date(els.start.value);
-  const end = new Date(els.end.value);
+  clearDateFieldErrors();
+  const start = parseDateTimeInput(els.start);
+  const end = parseDateTimeInput(els.end);
+
+  if (!start || !end) {
+    if (!start) els.start.setCustomValidity("Choose a valid start date and time.");
+    if (!end) els.end.setCustomValidity("Choose a valid end date and time.");
+    els.form.reportValidity();
+    return;
+  }
 
   if (end <= start) {
-    alert("End time must be after the start time.");
+    els.end.setCustomValidity("End time must be after the start time.");
+    els.form.reportValidity();
     return;
   }
 
@@ -539,6 +552,7 @@ function saveEvent(event) {
 function resetForm() {
   els.form.reset();
   els.eventId.value = "";
+  clearDateFieldErrors();
   setDefaultFormDates(state.cursor);
   els.formTitle.textContent = "New event";
   els.form.querySelector(".primary-button").textContent = "Save";
@@ -1395,6 +1409,18 @@ function setDefaultFormDates(baseDate = new Date()) {
   els.category.value = "saglik";
   els.reminder.value = "15";
   els.repeat.value = "none";
+  clearDateFieldErrors();
+}
+
+function parseDateTimeInput(input) {
+  if (!input.value || !input.validity.valid) return null;
+  const date = new Date(input.value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function clearDateFieldErrors() {
+  els.start.setCustomValidity("");
+  els.end.setCustomValidity("");
 }
 
 function seedDemoEvents() {
