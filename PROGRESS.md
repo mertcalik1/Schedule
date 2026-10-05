@@ -2,11 +2,12 @@
 
 ## Current Truth
 - Project: Your Schedule
-- Purpose: Personal calendar, reminder, and time-allocation analysis desktop app.
+- Purpose: Personal calendar, reminder, sync, and time-allocation analysis app across desktop and mobile wrappers.
 - Branch: `main`
 - Runtime/stack: Electron 31 desktop shell plus PWA/Capacitor mobile wrappers with static HTML/CSS/vanilla JavaScript UI.
-- Current architecture summary: Electron loads `src/index.html`; UI logic lives in `src/app.js`; styling in `src/styles.css`; PWA metadata/cache lives in `src/manifest.webmanifest` and `src/sw.js`; Capacitor mobile output builds through `src/scripts/build-web.cjs` into `src/www/`; Android/iOS projects live in `src/android/` and `src/ios/`; event data persists in localStorage.
+- Current architecture summary: Electron loads `src/index.html`; UI logic lives in `src/app.js`; styling in `src/styles.css`; PWA metadata/cache lives in `src/manifest.webmanifest` and `src/sw.js`; Capacitor mobile output builds through `src/scripts/build-web.cjs` into `src/www/`; Android/iOS projects live in `src/android/` and `src/ios/`; event/routine/note/settings data persists in localStorage and can sync through Supabase when configured.
 - Code validation: `node --check src/app.js`; `node --check src/main.js`
+- Full validation: from `src/`, run `pnpm run check` and `pnpm run cap:sync` after UI or mobile-facing changes.
 - Docs-only validation: Review changed Markdown files for template placeholders and broken local references.
 - Secret/link checks: `rg "SECRET|TOKEN|PASSWORD|API_KEY"`
 
@@ -15,6 +16,9 @@
 - Add stronger reminder behavior if the app needs to notify while fully closed.
 
 ## Recent Changelog
+- 2026-10-05: **Added Supabase sync and release update foundations.** Added user settings cloud sync UI, email/password Supabase REST sync with offline queue, localStorage-preserving record merge, Electron `electron-updater` wiring, GitHub Releases publish config, Supabase schema/RLS docs, and release checklist docs.
+- 2026-10-05: **Restyled calendar toward Google Calendar.** Updated the calendar visual language with Google-like blue accents, lighter surfaces, pill controls, cleaner grid lines, calmer event chips, refreshed dark mode, PWA theme color, and synced the updated web assets to Capacitor.
+- 2026-10-05: **Rebuilt and installed Windows app.** Recreated `src/dist/Your Schedule Setup 1.0.0.exe`, installed it locally, and confirmed the desktop shortcut opens the updated installed app from `AppData\Local\Programs\your-schedule`.
 - 2026-07-05: **Simplified routine sidebar controls.** Replaced the routine plus/minus buttons with a single gear edit button that opens the routine manager.
 - 2026-07-05: **Matched routine tracking to scheduled routines.** Made the routine tracking panel full calendar width and changed it to show only routines scheduled on the selected day.
 - 2026-07-05: **Changed day timeline minute display.** Day view now keeps hourly labels, shows half-hour divider lines, and positions events by their actual start minute within each hour.
