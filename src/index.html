@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#111111" />
+    <meta name="theme-color" content="#f8fafd" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Your Schedule" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -246,6 +246,41 @@
               <option value="GB">United Kingdom</option>
             </select>
           </label>
+
+          <section class="sync-settings" aria-label="Cloud sync">
+            <div class="settings-section-heading">
+              <h3>Cloud sync</h3>
+              <span id="syncStatusBadge" class="sync-status-badge">Offline</span>
+            </div>
+
+            <label>
+              Supabase URL
+              <input id="supabaseUrlInput" type="url" placeholder="https://your-project.supabase.co" autocomplete="off" />
+            </label>
+
+            <label>
+              Supabase anon key
+              <input id="supabaseAnonKeyInput" type="password" placeholder="Paste anon public key" autocomplete="off" />
+            </label>
+
+            <label>
+              Email
+              <input id="syncEmailInput" type="email" placeholder="you@example.com" autocomplete="username" />
+            </label>
+
+            <label>
+              Password
+              <input id="syncPasswordInput" type="password" placeholder="Your Supabase password" autocomplete="current-password" />
+            </label>
+
+            <div class="form-actions sync-actions">
+              <button class="primary-button compact-action" id="syncSignInButton" type="button">Sign in</button>
+              <button class="secondary-button compact-action" id="syncNowButton" type="button">Sync now</button>
+              <button class="secondary-button compact-action" id="syncSignOutButton" type="button">Sign out</button>
+            </div>
+
+            <p class="helper-text" id="syncStatusText">Sign in to keep events, routines, notes, and settings current on every device.</p>
+          </section>
         </form>
       </div>
     </section>

@@ -12,7 +12,16 @@ const themeStorageKey = "zaman-takvimi-theme-v1";
 const holidayCountryStorageKey = "zaman-takvimi-holiday-country-v1";
 const languageStorageKey = "zaman-takvimi-language-v1";
 const remoteHolidayFailuresStorageKey = "zaman-takvimi-remote-holiday-failures-v1";
+const syncConfigStorageKey = "zaman-takvimi-sync-config-v1";
+const syncSessionStorageKey = "zaman-takvimi-sync-session-v1";
+const syncQueueStorageKey = "zaman-takvimi-sync-queue-v1";
+const syncMetaStorageKey = "zaman-takvimi-sync-meta-v1";
 const routineDragType = "application/x-zaman-routine";
+const embeddedSupabaseConfig = {
+  url: "",
+  anonKey: "",
+};
+const syncCollectionNames = ["events", "routines", "routineCompletions", "weekNotes", "settings"];
 
 const categories = {
   saglik: { label: "Health", color: "#d64f4f", bg: "#fdeeee" },
@@ -137,6 +146,14 @@ const state = {
   language: loadLanguage(),
   selectedRoutineId: null,
   notifiedKeys: new Set(),
+  sync: {
+    config: loadSyncConfig(),
+    session: loadSyncSession(),
+    queue: loadSyncQueue(),
+    meta: loadSyncMeta(),
+    isSyncing: false,
+    timer: null,
+  },
 };
 
 const els = {
@@ -174,6 +191,15 @@ const els = {
   closeUserSettingsButton: document.querySelector("#closeUserSettingsButton"),
   languageSelect: document.querySelector("#languageSelect"),
   settingsHolidayCountrySelect: document.querySelector("#settingsHolidayCountrySelect"),
+  supabaseUrlInput: document.querySelector("#supabaseUrlInput"),
+  supabaseAnonKeyInput: document.querySelector("#supabaseAnonKeyInput"),
+  syncEmailInput: document.querySelector("#syncEmailInput"),
+  syncPasswordInput: document.querySelector("#syncPasswordInput"),
+  syncSignInButton: document.querySelector("#syncSignInButton"),
+  syncNowButton: document.querySelector("#syncNowButton"),
+  syncSignOutButton: document.querySelector("#syncSignOutButton"),
+  syncStatusBadge: document.querySelector("#syncStatusBadge"),
+  syncStatusText: document.querySelector("#syncStatusText"),
   notificationBellButton: document.querySelector("#notificationBellButton"),
   themeToggleButton: document.querySelector("#themeToggleButton"),
   notificationChat: document.querySelector("#notificationChat"),
@@ -198,13 +224,17 @@ registerServiceWorker();
 applyTheme();
 applyHolidayCountrySelection();
 applyLanguageSelection();
+applySyncSettings();
 setDefaultFormDates();
 bindEvents();
 renderRoutineList();
 render();
 updateNotificationStatus();
+updateSyncStatus();
+if (state.sync.session?.access_token) setTimeout(() => syncNow({ silent: true }), 1200);
 setInterval(checkReminders, 30000);
 setInterval(updateLiveCalendar, 30000);
+setInterval(() => syncNow({ silent: true }), 60000);
 
 function bindEvents() {
   els.form.addEventListener("submit", saveEvent);
@@ -233,6 +263,12 @@ function bindEvents() {
   els.routineManagerList.addEventListener("click", handleRoutineListClick);
   els.settingsHolidayCountrySelect.addEventListener("change", () => updateHolidayCountryOverride(els.settingsHolidayCountrySelect.value));
   els.languageSelect.addEventListener("change", updateLanguagePreference);
+  els.supabaseUrlInput.addEventListener("change", saveSyncSettingsFromForm);
+  els.supabaseAnonKeyInput.addEventListener("change", saveSyncSettingsFromForm);
+  els.syncEmailInput.addEventListener("change", saveSyncSettingsFromForm);
+  els.syncSignInButton.addEventListener("click", signInToSync);
+  els.syncNowButton.addEventListener("click", () => syncNow());
+  els.syncSignOutButton.addEventListener("click", signOutOfSync);
   els.notificationBellButton.addEventListener("click", toggleNotificationChat);
   els.themeToggleButton.addEventListener("click", toggleTheme);
   els.enableNotificationsButton.addEventListener("click", requestNotifications);
@@ -257,6 +293,8 @@ function bindEvents() {
     if (event.key === "Escape" && !els.notificationChat.classList.contains("hidden")) closeNotificationChat();
   });
 
+  window.addEventListener("online", () => syncNow({ silent: true }));
+
   document.addEventListener("click", (event) => {
     if (els.notificationChat.classList.contains("hidden")) return;
     if (els.notificationChat.contains(event.target) || els.notificationBellButton.contains(event.target)) return;
@@ -273,6 +311,7 @@ function toggleSidebar() {
 function toggleTheme() {
   state.theme = state.theme === "dark" ? "light" : "dark";
   localStorage.setItem(themeStorageKey, state.theme);
+  markSettingForSync("theme", state.theme);
   applyTheme();
 }
 
@@ -287,6 +326,7 @@ function applyTheme() {
 function updateHolidayCountryOverride(value) {
   state.holidayCountryOverride = value === "AUTO" ? "" : value;
   localStorage.setItem(holidayCountryStorageKey, state.holidayCountryOverride);
+  markSettingForSync("holidayCountryOverride", state.holidayCountryOverride);
   state.holidayCountry = state.holidayCountryOverride || detectHolidayCountry();
   applyHolidayCountrySelection();
   render();
@@ -300,6 +340,7 @@ function applyHolidayCountrySelection() {
 function updateLanguagePreference() {
   state.language = els.languageSelect.value === "tr" ? "tr" : "en";
   localStorage.setItem(languageStorageKey, state.language);
+  markSettingForSync("language", state.language);
   applyLanguageSelection();
 }
 
@@ -310,6 +351,8 @@ function applyLanguageSelection() {
 function openUserSettings() {
   applyHolidayCountrySelection();
   applyLanguageSelection();
+  applySyncSettings();
+  updateSyncStatus();
   els.userSettingsModal.classList.remove("hidden");
   els.userSettingsModal.setAttribute("aria-hidden", "false");
   setTimeout(() => els.languageSelect.focus(), 0);
@@ -318,6 +361,79 @@ function openUserSettings() {
 function closeUserSettings() {
   els.userSettingsModal.classList.add("hidden");
   els.userSettingsModal.setAttribute("aria-hidden", "true");
+}
+
+function applySyncSettings() {
+  els.supabaseUrlInput.value = state.sync.config.url || embeddedSupabaseConfig.url;
+  els.supabaseAnonKeyInput.value = state.sync.config.anonKey || embeddedSupabaseConfig.anonKey;
+  els.syncEmailInput.value = state.sync.config.email || state.sync.session?.user?.email || "";
+  els.syncPasswordInput.value = "";
+}
+
+function saveSyncSettingsFromForm() {
+  state.sync.config = {
+    url: normalizeSupabaseUrl(els.supabaseUrlInput.value),
+    anonKey: els.supabaseAnonKeyInput.value.trim(),
+    email: els.syncEmailInput.value.trim(),
+  };
+  persistSyncConfig();
+  updateSyncStatus();
+}
+
+function updateSyncStatus(message) {
+  const hasConfig = Boolean(getSupabaseUrl() && getSupabaseAnonKey());
+  const isOnline = Boolean(state.sync.session?.access_token);
+  const queued = state.sync.queue.length;
+  const label = isOnline ? "Online" : hasConfig ? "Signed out" : "Offline";
+  els.syncStatusBadge.textContent = state.sync.isSyncing ? "Syncing" : label;
+  els.syncStatusBadge.classList.toggle("is-online", isOnline && !state.sync.isSyncing);
+  els.syncStatusBadge.classList.toggle("is-error", Boolean(message?.isError));
+  els.syncStatusText.textContent = message?.text || defaultSyncStatusText(hasConfig, isOnline, queued);
+  els.syncSignOutButton.disabled = !isOnline;
+  els.syncNowButton.disabled = !isOnline || state.sync.isSyncing;
+}
+
+function defaultSyncStatusText(hasConfig, isOnline, queued) {
+  if (!hasConfig) return "Add your Supabase URL and anon key to enable cloud sync.";
+  if (!isOnline) return "Sign in to keep events, routines, notes, and settings current on every device.";
+  if (queued > 0) return `${queued} local changes waiting to sync.`;
+  return "Cloud sync is ready.";
+}
+
+async function signInToSync() {
+  saveSyncSettingsFromForm();
+  const email = els.syncEmailInput.value.trim();
+  const password = els.syncPasswordInput.value;
+  if (!getSupabaseUrl() || !getSupabaseAnonKey() || !email || !password) {
+    updateSyncStatus({ text: "Enter Supabase URL, anon key, email, and password.", isError: true });
+    return;
+  }
+
+  state.sync.isSyncing = true;
+  updateSyncStatus({ text: "Signing in..." });
+  try {
+    const session = await requestSupabasePasswordSession(email, password);
+    if (!session?.access_token) {
+      updateSyncStatus({ text: "Check your email if Supabase requires confirmation, then sign in again.", isError: true });
+      return;
+    }
+    state.sync.session = session;
+    persistSyncSession();
+    els.syncPasswordInput.value = "";
+    updateSyncStatus({ text: "Signed in. Syncing local data..." });
+    await syncNow({ silent: true, skipBusyCheck: true });
+  } catch (error) {
+    updateSyncStatus({ text: error.message || "Sign in failed.", isError: true });
+  } finally {
+    state.sync.isSyncing = false;
+    updateSyncStatus();
+  }
+}
+
+function signOutOfSync() {
+  state.sync.session = null;
+  persistSyncSession();
+  updateSyncStatus({ text: "Signed out. Local data remains on this device." });
 }
 
 function syncEndToStart() {
@@ -453,10 +569,12 @@ function saveRoutine(event) {
     category: els.routineCategory.value,
     reminderMinutes: 15,
     notes: `${title} routine`,
+    updatedAt: new Date().toISOString(),
   };
 
   state.routines = state.routines.filter((item) => item.id !== routine.id).concat(routine);
   persistRoutines();
+  markRecordForSync("routines", routine.id, routine);
   resetRoutineForm();
   renderRoutineList();
 }
@@ -482,6 +600,7 @@ function deleteRoutine(id) {
   if (confirm(`Delete "${routine.title}" routine?`)) {
     state.routines = state.routines.filter((item) => item.id !== id);
     persistRoutines();
+    markRecordDeletedForSync("routines", id);
     resetRoutineForm();
     renderRoutineList();
   }
@@ -530,6 +649,7 @@ function saveEvent(event) {
     return;
   }
 
+  const existing = state.events.find((item) => item.id === els.eventId.value);
   const payload = {
     id: els.eventId.value || createId(),
     title: els.title.value.trim(),
@@ -539,11 +659,13 @@ function saveEvent(event) {
     reminderMinutes: Number(els.reminder.value),
     repeat: els.repeat.value,
     notes: els.notes.value.trim(),
-    createdAt: new Date().toISOString(),
+    createdAt: existing?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
   state.events = state.events.filter((item) => item.id !== payload.id).concat(payload);
   persistEvents();
+  markRecordForSync("events", payload.id, payload);
   state.cursor = startOfDay(start);
   closeModal();
   render();
@@ -585,6 +707,7 @@ function deleteEvent(id) {
   if (confirm(`Delete "${item.title}" event?`)) {
     state.events = state.events.filter((event) => event.id !== id);
     persistEvents();
+    markRecordDeletedForSync("events", id);
     renderDayEventsInModal(state.cursor);
     render();
   }
@@ -724,8 +847,10 @@ function updateWeekNote(key, value) {
   const note = value.trim();
   if (note) {
     state.weekNotes[key] = value;
+    markRecordForSync("weekNotes", key, { key, value });
   } else {
     delete state.weekNotes[key];
+    markRecordDeletedForSync("weekNotes", key);
   }
   persistWeekNotes();
 }
@@ -902,6 +1027,7 @@ function addRoutineToDate(routine, date, options = {}) {
   state.events = state.events.concat(event);
   state.selectedRoutineId = null;
   persistEvents();
+  markRecordForSync("events", event.id, event);
   state.cursor = startOfDay(start);
   render();
 }
@@ -1435,10 +1561,12 @@ function seedDemoEvents() {
 
   state.events = state.events.concat(events);
   persistEvents();
+  events.forEach((event) => markRecordForSync("events", event.id, event));
   render();
 }
 
 function makeEvent(title, start, durationMinutes, category, notes, reminderMinutes, repeat) {
+  const now = new Date().toISOString();
   return {
     id: createId(),
     title,
@@ -1448,7 +1576,8 @@ function makeEvent(title, start, durationMinutes, category, notes, reminderMinut
     notes,
     reminderMinutes,
     repeat,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
@@ -1542,6 +1671,68 @@ function loadHolidayCountryOverride() {
   } catch {
     return "";
   }
+}
+
+function loadSyncConfig() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(syncConfigStorageKey));
+    return stored && typeof stored === "object"
+      ? {
+          url: normalizeSupabaseUrl(stored.url),
+          anonKey: stored.anonKey || "",
+          email: stored.email || "",
+        }
+      : { url: "", anonKey: "", email: "" };
+  } catch {
+    return { url: "", anonKey: "", email: "" };
+  }
+}
+
+function loadSyncSession() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(syncSessionStorageKey));
+    return stored && stored.access_token ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadSyncQueue() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(syncQueueStorageKey));
+    return Array.isArray(stored) ? stored : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadSyncMeta() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(syncMetaStorageKey));
+    return stored && typeof stored === "object" ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistSyncConfig() {
+  localStorage.setItem(syncConfigStorageKey, JSON.stringify(state.sync.config));
+}
+
+function persistSyncSession() {
+  if (state.sync.session) {
+    localStorage.setItem(syncSessionStorageKey, JSON.stringify(state.sync.session));
+  } else {
+    localStorage.removeItem(syncSessionStorageKey);
+  }
+}
+
+function persistSyncQueue() {
+  localStorage.setItem(syncQueueStorageKey, JSON.stringify(state.sync.queue));
+}
+
+function persistSyncMeta() {
+  localStorage.setItem(syncMetaStorageKey, JSON.stringify(state.sync.meta));
 }
 
 function persistEvents() {
@@ -1640,6 +1831,334 @@ function isAnyRoutineCompletionDone(routineIds, date) {
   return routineIds.filter(Boolean).some((routineId) => isRoutineDone(routineId, date));
 }
 
+function markRecordForSync(collection, recordId, data) {
+  if (!syncCollectionNames.includes(collection) || !recordId) return;
+  queueSyncRecord(collection, recordId, data, null, null, { schedule: true });
+}
+
+function markRecordDeletedForSync(collection, recordId) {
+  if (!syncCollectionNames.includes(collection) || !recordId) return;
+  queueSyncRecord(collection, recordId, null, new Date().toISOString(), null, { schedule: true });
+}
+
+function markSettingForSync(recordId, value) {
+  markRecordForSync("settings", recordId, { key: recordId, value });
+}
+
+function queueSyncRecord(collection, recordId, data, deletedAt = null, clientUpdatedAt = null, options = {}) {
+  const now = new Date().toISOString();
+  const updatedAt = clientUpdatedAt || data?.updatedAt || now;
+  const recordKey = syncRecordKey(collection, recordId);
+  const queuedRecord = {
+    collection,
+    recordId,
+    data: data ? { ...data, updatedAt } : null,
+    clientUpdatedAt: updatedAt,
+    deletedAt,
+  };
+
+  state.sync.meta[recordKey] = {
+    clientUpdatedAt: updatedAt,
+    deletedAt,
+  };
+  state.sync.queue = state.sync.queue.filter((item) => syncRecordKey(item.collection, item.recordId) !== recordKey).concat(queuedRecord);
+  persistSyncMeta();
+  persistSyncQueue();
+  updateSyncStatus();
+  if (options.schedule !== false) scheduleSync();
+}
+
+function scheduleSync() {
+  if (state.sync.timer) clearTimeout(state.sync.timer);
+  state.sync.timer = setTimeout(() => syncNow({ silent: true }), 1400);
+}
+
+async function syncNow(options = {}) {
+  if (state.sync.isSyncing && !options.skipBusyCheck) return;
+  saveSyncSettingsFromForm();
+  if (!getSupabaseUrl() || !getSupabaseAnonKey()) {
+    updateSyncStatus({ text: "Add your Supabase URL and anon key to enable cloud sync.", isError: !options.silent });
+    return;
+  }
+  if (!state.sync.session?.access_token) {
+    updateSyncStatus({ text: "Sign in before syncing.", isError: !options.silent });
+    return;
+  }
+  if (navigator.onLine === false) {
+    updateSyncStatus({ text: "Offline. Changes will sync when this device reconnects." });
+    return;
+  }
+
+  const restoreBusy = state.sync.isSyncing && options.skipBusyCheck;
+  state.sync.isSyncing = true;
+  updateSyncStatus({ text: "Syncing..." });
+  try {
+    await ensureFreshSyncSession();
+    const remoteRows = await supabaseRequest("/rest/v1/schedule_records?select=collection,record_id,data,client_updated_at,deleted_at,server_updated_at", {
+      method: "GET",
+    });
+    const changed = mergeRemoteRows(Array.isArray(remoteRows) ? remoteRows : []);
+    await uploadSyncQueue();
+    if (changed) {
+      persistSyncedState();
+      renderRoutineList();
+      render();
+    }
+    updateSyncStatus({ text: "Sync complete." });
+  } catch (error) {
+    updateSyncStatus({ text: error.message || "Sync failed.", isError: true });
+  } finally {
+    if (!restoreBusy) state.sync.isSyncing = false;
+    updateSyncStatus();
+  }
+}
+
+function mergeRemoteRows(remoteRows) {
+  let changed = false;
+  const remoteByKey = new Map(remoteRows.map((row) => [syncRecordKey(row.collection, row.record_id), row]));
+  const localRecords = collectLocalSyncRecords();
+
+  localRecords.forEach((localRecord) => {
+    const key = syncRecordKey(localRecord.collection, localRecord.recordId);
+    const remoteRecord = remoteByKey.get(key);
+    if (!remoteRecord) {
+      queueSyncRecord(localRecord.collection, localRecord.recordId, localRecord.data, null, new Date().toISOString(), { schedule: false });
+      return;
+    }
+
+    const localUpdatedAt = getLocalRecordUpdatedAt(localRecord);
+    const remoteUpdatedAt = getRemoteRecordUpdatedAt(remoteRecord);
+    if (isIsoAfter(remoteUpdatedAt, localUpdatedAt)) {
+      changed = applyRemoteRecord(remoteRecord) || changed;
+    } else if (isIsoAfter(localUpdatedAt, remoteUpdatedAt)) {
+      queueSyncRecord(localRecord.collection, localRecord.recordId, localRecord.data, null, localUpdatedAt, { schedule: false });
+    }
+    remoteByKey.delete(key);
+  });
+
+  remoteByKey.forEach((remoteRecord) => {
+    if (!remoteRecord.deleted_at) changed = applyRemoteRecord(remoteRecord) || changed;
+  });
+
+  return changed;
+}
+
+function collectLocalSyncRecords() {
+  return [
+    ...state.events.map((event) => ({ collection: "events", recordId: event.id, data: event })),
+    ...state.routines.map((routine) => ({ collection: "routines", recordId: routine.id, data: routine })),
+    ...Object.entries(state.routineCompletions).map(([key, done]) => ({ collection: "routineCompletions", recordId: key, data: { key, done: Boolean(done) } })),
+    ...Object.entries(state.weekNotes).map(([key, value]) => ({ collection: "weekNotes", recordId: key, data: { key, value } })),
+    { collection: "settings", recordId: "theme", data: { key: "theme", value: state.theme } },
+    { collection: "settings", recordId: "language", data: { key: "language", value: state.language } },
+    { collection: "settings", recordId: "holidayCountryOverride", data: { key: "holidayCountryOverride", value: state.holidayCountryOverride } },
+  ];
+}
+
+function applyRemoteRecord(record) {
+  const collection = record.collection;
+  const recordId = record.record_id;
+  const key = syncRecordKey(collection, recordId);
+  const data = record.data || {};
+  const deletedAt = record.deleted_at || null;
+  let changed = false;
+
+  state.sync.meta[key] = {
+    clientUpdatedAt: getRemoteRecordUpdatedAt(record),
+    deletedAt,
+  };
+
+  if (collection === "events") {
+    const before = state.events.length;
+    state.events = state.events.filter((event) => event.id !== recordId);
+    if (!deletedAt) state.events = state.events.concat(data);
+    changed = before !== state.events.length || !deletedAt;
+  }
+
+  if (collection === "routines") {
+    const before = state.routines.length;
+    state.routines = state.routines.filter((routine) => routine.id !== recordId);
+    if (!deletedAt) state.routines = state.routines.concat(data);
+    changed = before !== state.routines.length || !deletedAt;
+  }
+
+  if (collection === "routineCompletions") {
+    const hadValue = Object.prototype.hasOwnProperty.call(state.routineCompletions, recordId);
+    if (deletedAt) {
+      delete state.routineCompletions[recordId];
+      changed = hadValue;
+    } else {
+      state.routineCompletions[recordId] = Boolean(data.done);
+      changed = true;
+    }
+  }
+
+  if (collection === "weekNotes") {
+    const hadValue = Object.prototype.hasOwnProperty.call(state.weekNotes, recordId);
+    if (deletedAt) {
+      delete state.weekNotes[recordId];
+      changed = hadValue;
+    } else {
+      state.weekNotes[recordId] = data.value || "";
+      changed = true;
+    }
+  }
+
+  if (collection === "settings" && !deletedAt) {
+    if (recordId === "theme" && (data.value === "dark" || data.value === "light")) state.theme = data.value;
+    if (recordId === "language" && (data.value === "tr" || data.value === "en")) state.language = data.value;
+    if (recordId === "holidayCountryOverride") {
+      state.holidayCountryOverride = data.value || "";
+      state.holidayCountry = state.holidayCountryOverride || detectHolidayCountry();
+    }
+    changed = true;
+  }
+
+  persistSyncMeta();
+  return changed;
+}
+
+function persistSyncedState() {
+  persistEvents();
+  persistRoutines();
+  persistRoutineCompletions();
+  persistWeekNotes();
+  localStorage.setItem(themeStorageKey, state.theme);
+  localStorage.setItem(languageStorageKey, state.language);
+  localStorage.setItem(holidayCountryStorageKey, state.holidayCountryOverride);
+  applyTheme();
+  applyLanguageSelection();
+  applyHolidayCountrySelection();
+}
+
+async function uploadSyncQueue() {
+  if (state.sync.queue.length === 0) return;
+  const userId = state.sync.session?.user?.id;
+  if (!userId) throw new Error("Sync session is missing a user id.");
+
+  const rows = state.sync.queue.map((item) => ({
+    user_id: userId,
+    collection: item.collection,
+    record_id: item.recordId,
+    data: item.data,
+    client_updated_at: item.clientUpdatedAt,
+    deleted_at: item.deletedAt,
+  }));
+
+  await supabaseRequest("/rest/v1/schedule_records?on_conflict=user_id,collection,record_id", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates",
+    },
+    body: JSON.stringify(rows),
+  });
+
+  state.sync.queue = [];
+  persistSyncQueue();
+}
+
+async function requestSupabasePasswordSession(email, password) {
+  try {
+    const session = await supabaseAuthRequest("/auth/v1/token?grant_type=password", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    return normalizeSyncSession(session);
+  } catch (error) {
+    if (!/invalid|credentials|login/i.test(error.message)) throw error;
+  }
+
+  const signUpResult = await supabaseAuthRequest("/auth/v1/signup", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  return normalizeSyncSession(signUpResult);
+}
+
+async function ensureFreshSyncSession() {
+  const expiresAt = Number(state.sync.session?.expires_at || 0);
+  if (expiresAt && expiresAt - 60 > Math.floor(Date.now() / 1000)) return;
+  const refreshToken = state.sync.session?.refresh_token;
+  if (!refreshToken) return;
+  const refreshed = await supabaseAuthRequest("/auth/v1/token?grant_type=refresh_token", {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  state.sync.session = normalizeSyncSession(refreshed);
+  persistSyncSession();
+}
+
+async function supabaseRequest(path, options = {}) {
+  await ensureFreshSyncSession();
+  const headers = {
+    apikey: getSupabaseAnonKey(),
+    Authorization: `Bearer ${state.sync.session.access_token}`,
+    ...(options.headers || {}),
+  };
+  const response = await fetch(`${getSupabaseUrl()}${path}`, { ...options, headers });
+  return parseSupabaseResponse(response);
+}
+
+async function supabaseAuthRequest(path, options = {}) {
+  const headers = {
+    apikey: getSupabaseAnonKey(),
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  const response = await fetch(`${getSupabaseUrl()}${path}`, { ...options, headers });
+  return parseSupabaseResponse(response);
+}
+
+async function parseSupabaseResponse(response) {
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const message = body?.msg || body?.message || body?.error_description || body?.error || "Supabase request failed.";
+    throw new Error(message);
+  }
+  return body;
+}
+
+function normalizeSyncSession(session) {
+  if (!session?.access_token) return null;
+  return {
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_at: session.expires_at || Math.floor(Date.now() / 1000) + Number(session.expires_in || 3600),
+    user: session.user || null,
+  };
+}
+
+function getSupabaseUrl() {
+  return normalizeSupabaseUrl(state.sync.config.url || embeddedSupabaseConfig.url);
+}
+
+function getSupabaseAnonKey() {
+  return state.sync.config.anonKey || embeddedSupabaseConfig.anonKey;
+}
+
+function normalizeSupabaseUrl(value) {
+  return (value || "").trim().replace(/\/+$/, "");
+}
+
+function syncRecordKey(collection, recordId) {
+  return `${collection}:${recordId}`;
+}
+
+function getLocalRecordUpdatedAt(record) {
+  const meta = state.sync.meta[syncRecordKey(record.collection, record.recordId)];
+  return meta?.clientUpdatedAt || record.data?.updatedAt || record.data?.createdAt || "1970-01-01T00:00:00.000Z";
+}
+
+function getRemoteRecordUpdatedAt(record) {
+  return record.client_updated_at || record.server_updated_at || "1970-01-01T00:00:00.000Z";
+}
+
+function isIsoAfter(left, right) {
+  return new Date(left).getTime() > new Date(right).getTime();
+}
+
 function minuteFromSlotPointer(event, slotBody) {
   if (!slotBody) return 0;
   const rect = slotBody.getBoundingClientRect();
@@ -1653,8 +2172,10 @@ function setRoutineDone(routineId, date, isDone) {
   const key = `${dateKey(date)}-${routineId}`;
   if (isDone) {
     state.routineCompletions[key] = true;
+    markRecordForSync("routineCompletions", key, { key, done: true });
   } else {
     delete state.routineCompletions[key];
+    markRecordDeletedForSync("routineCompletions", key);
   }
   persistRoutineCompletions();
 }

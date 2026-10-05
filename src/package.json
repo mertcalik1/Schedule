@@ -5,6 +5,10 @@
     "author":  "Mert C",
     "main":  "main.js",
     "private":  true,
+    "repository":  {
+                       "type":  "git",
+                       "url":  "https://github.com/mertcalik1/Schedule.git"
+                   },
     "scripts":  {
                     "start":  "electron .",
                     "check":  "node --check app.js \u0026\u0026 node --check main.js",
@@ -23,6 +27,14 @@
                   "directories":  {
                                       "output":  "dist"
                                   },
+                  "publish":  [
+                                  {
+                                      "provider":  "github",
+                                      "owner":  "mertcalik1",
+                                      "repo":  "Schedule",
+                                      "releaseType":  "release"
+                                  }
+                              ],
                   "files":  [
                                 "index.html",
                                 "app.js",
@@ -46,6 +58,9 @@
                               "icon":  "assets/logo.ico"
                           }
               },
+    "dependencies":  {
+                         "electron-updater":  "^6.8.5"
+                     },
     "devDependencies":  {
                             "@capacitor/android":  "^8.4.1",
                             "@capacitor/cli":  "^8.4.1",
